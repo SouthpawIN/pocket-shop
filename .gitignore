@@ -1,0 +1,43 @@
+# Pocket Shop - Git Ignore
+
+# Configuration with real API keys - NEVER commit
+config.yaml
+
+# Financial tracking data - local only
+data/finance.json
+
+# Python cache
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Environment variables
+.env
+.env.local
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
