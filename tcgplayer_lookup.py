@@ -270,5 +270,49 @@ def main():
     return result
 
 
+# Add this function to tcgplayer_lookup.py for use by main_loop.py
+
+def lookup_card_price(card_name: str, set_code: str = None) -> float:
+    """Look up a single card's price on TCGPlayer.
+    
+    Args:
+        card_name: Name of the card to search
+        set_code: Optional set code filter
+        
+    Returns:
+        Average market price in dollars, or 0.0 if not found
+    """
+    result = perform_search(card_name)
+    
+    if result.get("success") and result.get("prices_found"):
+        prices = [format_price(p) for p in result["prices_found"] if format_price(p) > 0]
+        if prices:
+            return sum(prices) / len(prices)  # Return average
+    
+    return 0.0  # Not found or error
+
+# Also add a simpler direct lookup function
+def get_card_average_price(card_name: str, set_code: str = None) -> dict:
+    """Get average price for a card.
+    
+    Returns dict with: min, max, avg price and count
+    """
+    result = perform_search(card_name)
+    
+    if not result.get("success") or not result.get("prices_found"):
+        return {"min": 0, "max": 0, "avg": 0, "count": 0}
+    
+    prices = [format_price(p) for p in result["prices_found"] if format_price(p) > 0]
+    
+    if not prices:
+        return {"min": 0, "max": 0, "avg": 0, "count": 0}
+    
+    return {
+        "min": min(prices),
+        "max": max(prices),
+        "avg": sum(prices) / len(prices),
+        "count": len(prices)
+    }
+
 if __name__ == "__main__":
     main()

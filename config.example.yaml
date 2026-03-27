@@ -1,27 +1,21 @@
-# Pocket Shop Configuration Template
+# Pocket Shop Configuration Example
 # Copy this to config.yaml and fill in your values
-# DO NOT commit config.yaml to git!
 
-# Restock fund target - when reached, consider expanding inventory
-restock_fund_target: 500.00
+financial:
+  restock_target: 500.00    # Dollar amount to trigger set purchase
+  ev_threshold: 10.0        # Minimum EV percentage to consider
 
-# EV threshold for set monitoring (minimum expected value to flag)
-ev_threshold: 10.0
+gmail:
+  email: "your-email@gmail.com"
+  app_password: "YOUR_16_CHAR_APP_PASSWORD"  # From Google App Passwords
 
-# Revenue split percentages (must sum to 1.0)
-profit_split:
-  savings: 0.30    # Long-term accumulation fund
-  profit: 0.30     # Actual earnings you keep
-  restock: 0.40    # Reinvestment for buying more cards
+ebay:
+  mode: browser             # 'browser' (default) or 'api'
+  # If using API mode, add these:
+  # developer_id: "YOUR_DEVELOPER_ID"
+  # cert_id: "YOUR_CERTIFICATE_ID"
+  # app_id: "YOUR_RU_NAME"
+  # refresh_token: "YOUR_REFRESH_TOKEN"
 
-# eBay API credentials (get from https://developer.ebay.com)
-ebay_developer_id: "YOUR_EBAY_DEVELOPER_ID"
-ebay_app_id: "YOUR_EBAY_APP_ID" 
-ebay_cert_id: "YOUR_EBAY_CERT_ID"
-ebay_refresh_token: "YOUR_EBAY_REFRESH_TOKEN"
-ebay_marketplace: "EBAY_US"
-
-# Gmail configuration (for sale email monitoring)
-# Use App Password if 2FA enabled: https://myaccount.google.com/apppasswords
-gmail_email: "your.email@gmail.com"
-gmail_password: "YOUR_GMAIL_APP_PASSWORD"
+tcgplayer:
+  api_key: "YOUR_API_KEY"   # Optional - browser mode works without this

@@ -26,13 +26,27 @@ from finance_tracker import (
 )
 from mtgstocks_monitor import MTGStocksMonitor
 from card_scanner import CardScanner
-from tcgplayer_lookup import lookup_card_price  # Existing module
+from tcgplayer_lookup import lookup_card_price, search_tcgplayer
+from ebay_listings import eBayListingManager
+from gmail_monitor import GmailMonitor, update_finance_from_sales
 
 ### CONFIGURATION ###
 
-SET_PURCHASE_THRESHOLD = 500.00  # Restock fund target before buying
-EV_THRESHOLD = 10.0              # Minimum EV percentage
-PRICE_RESEARCH_SOURCES = ["amazon", "mtggoldfish", "tcgplayer"]
+try:
+    import yaml
+    with open("config.yaml", "r") as f:
+        config = yaml.safe_load(f)
+except:
+    config = {
+        "financial": {"restock_target": 500.00, "ev_threshold": 10.0},
+        "gmail": {},
+        "ebay": {"mode": "browser"}
+    }
+
+SET_PURCHASE_THRESHOLD = config.get("financial", {}).get("restock_target", 500.00)
+EV_THRESHOLD = config.get("financial", {}).get("ev_threshold", 10.0)
+GMAIL_EMAIL = config.get("gmail", {}).get("email", "")
+GMAIL_APP_PASSWORD = config.get("gmail", {}).get("app_password", "")
 
 ### MAIN LOOP FUNCTIONS ###
 
@@ -68,20 +82,17 @@ def research_prices(sets):
         print(f"\nResearching: {set_name}")
         
         # Would use browser automation to check each source
-        # For now, placeholder structure
         prices = {
             "mtgstocks": set_data.get('buy_price', 0),
-            "amazon": None,  # Would scrape Amazon
-            "mtggoldfish": None,  # Would scrape MTGGoldfish  
-            "tcgplayer": None  # Would check TCGPlayer
+            "amazon": None,
+            "mtggoldfish": None,
+            "tcgplayer": None
         }
         
-        # Find lowest price
         available_prices = [p for p in prices.values() if p is not None]
         lowest_price = min(available_prices) if available_prices else None
         
         if lowest_price:
-            # Calculate real profit margin
             ev = set_data.get('ev', 0)
             expected_value = lowest_price * (1 + ev/100)
             profit_margin = ((expected_value - lowest_price) / lowest_price) * 100
@@ -93,9 +104,7 @@ def research_prices(sets):
                 "profit_margin": profit_margin
             })
     
-    # Sort by profit margin
     researched.sort(key=lambda x: x.get('profit_margin', 0), reverse=True)
-    
     return researched
 
 def check_can_purchase(researched_sets):
@@ -128,11 +137,6 @@ def purchase_set(set_data):
     print(f"Price: ${price:.2f}")
     print("\n[PURCHASE MODE: Manual confirmation required]")
     print("User should purchase this set from the recommended source.")
-    print("After purchase arrives, continue to card scanning.")
-    
-    # Record the purchase (deducts from restock fund)
-    # Only do this after user confirms purchase
-    # record_set_purchase(set_name, set_code, price)
     
     return True
 
@@ -146,8 +150,8 @@ def scan_arrived_cards(card_image_paths):
     identified_cards = scanner.batch_scan(card_image_paths)
     
     print(f"\nIdentified {len(identified_cards)} cards:")
-    for card in identified_cards[:10]:  # Show first 10
-        print(f"  - {card.get('name', 'Unknown')} [{card.get('set_code', '?")}]")
+    for card in identified_cards[:10]:
+        print(f"  - {card.get('name', 'Unknown')} [{card.get('set_code', '?')}]")
     
     return identified_cards
 
@@ -164,7 +168,6 @@ def price_identified_cards(cards):
         
         print(f"Pricing: {name}")
         
-        # Use existing TCGPlayer lookup
         try:
             price = lookup_card_price(name, set_code)
             card['tcgplayer_price'] = price
@@ -181,12 +184,15 @@ def create_ebay_listings(priced_cards):
     print("STEP 6: Creating eBay Listings")
     print("="*60)
     
-    print("[EBAY LISTING MODE: Manual or API-based]")
-    print(f"Ready to list {len(priced_cards)} cards.")
-    print("\nWould use eBay API or browser automation here.")
-    print("Each card would get a draft listing created.")
+    ebay_manager = eBayListingManager()
     
-    return True
+    print(f"Creating {len(priced_cards)} listings...")
+    results = ebay_manager.bulk_create_listings(priced_cards)
+    
+    successful = sum(1 for r in results if r.get('success'))
+    print(f"Created {successful}/{len(priced_cards)} listings")
+    
+    return results
 
 def monitor_sales_and_split():
     """Step 7: Monitor sales and apply splits."""
@@ -194,11 +200,26 @@ def monitor_sales_and_split():
     print("STEP 7: Sales Monitoring")
     print("="*60)
     
-    print("[SALES MONITORING: Check Gmail/eBay for sales]")
-    print("Would monitor for sale notifications and call record_sale()")
-    print("Each sale automatically splits 30/30/40")
+    if not GMAIL_EMAIL or not GMAIL_APP_PASSWORD:
+        print("Gmail credentials not configured. Skipping sales monitoring.")
+        print("Run setup.py to configure Gmail app password.")
+        return []
     
-    return True
+    try:
+        monitor = GmailMonitor(GMAIL_EMAIL, GMAIL_APP_PASSWORD)
+        sales = monitor.check_for_sales(limit=10)
+        
+        if sales:
+            print(f"Found {len(sales)} new sales")
+            update_finance_from_sales(sales)
+            print("Sales recorded with 30/30/40 split applied")
+        else:
+            print("No new sales found")
+        
+        return sales
+    except Exception as e:
+        print(f"Error monitoring sales: {e}")
+        return []
 
 def main_loop():
     """Main automated trading loop."""
@@ -208,28 +229,27 @@ def main_loop():
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     while True:
-        # Check current status
         summary = get_finance_summary()
         print(f"\n\n[LOOP CYCLE]")
         print(f"Restock Fund: ${summary['restock_fund']:.2f}")
         print(f"Can afford set: {summary['can_afford_set']}")
         
+        # Monitor sales first (always run)
+        monitor_sales_and_split()
+        
         # Only discover/purchase if we have funds
         if summary['restock_fund'] >= SET_PURCHASE_THRESHOLD:
-            # Step 1-3: Discover and purchase sets
             sets = discover_sets()
             if sets:
                 researched = research_prices(sets)
                 affordable = check_can_purchase(researched)
                 if affordable:
                     print(f"\nFound {len(affordable)} affordable sets!")
-                    # user confirmation would go here
-                    # purchase_set(affordable[0])
+                    # User confirmation would go here
         else:
             print("\nWaiting for restock fund to reach threshold...")
             print("Focus on card scanning, pricing, and listing.")
         
-        # Wait before next cycle
         print("\n[PAUSING - waiting for user action or sales]")
         print("Press Ctrl+C to stop the loop")
         
