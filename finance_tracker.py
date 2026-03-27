@@ -111,8 +111,7 @@ def record_set_purchase(set_name, set_code, price):
 
 if __name__ == "__main__":
     print("=== Pocket Shop Finance Module ===")
-    print("
-Initial finance data initialized.")
+    print("Initial finance data initialized.")
     print(f"Restock threshold: ${SET_THRESHOLD:.2f}")
     print(f"EV threshold: {EV_THRESHOLD}%")
-    print("\nFinance module ready. Import into main loop.")
+    print("Finance module ready. Import into main loop.")

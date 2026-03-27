@@ -64,9 +64,7 @@ class MTGStocksMonitor:
         """Parse set data from browser snapshot."""
         sets = []
         
-        # Look for patterns like "Set Name
-EV: 15.2%
-Buy Price: $45.00"
+        # Look for patterns like "Set Name", "EV: 15.2%", "Buy Price: $45.00"
         # This is a simplified parser - would need refinement based on actual page structure
         
         # Alternative: Use structured data extraction
