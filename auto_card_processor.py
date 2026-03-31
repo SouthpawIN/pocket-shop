@@ -45,7 +45,10 @@ except ImportError:
 ### CARD IDENTIFICATION ###
 
 def identify_card_vision(image_path: str) -> dict:
-    """Use Qwen-Omni vision to identify a Magic card from image."""
+    """Use vision AI to identify a Magic card from image.
+    
+    Tries local Qwen-Omni first, falls back to OpenRouter if unavailable.
+    """
     
     print(f"\n📸 Identifying card from: {image_path}")
     
@@ -54,16 +57,7 @@ def identify_card_vision(image_path: str) -> dict:
         image_data = f.read()
         image_b64 = base64.b64encode(image_data).decode('utf-8')
     
-    # Prepare vision request
-    payload = {
-        "model": "qwen-omni",
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
-                {
-                    "type": "text",
-                    "text": """Identify this Magic: The Gathering trading card. Provide exact details:
+    vision_prompt = """Identify this Magic: The Gathering trading card. Provide exact details:
 
 1. Card name (exact name as printed on card)
 2. Set name and set code (e.g., "Duskmourn: House of Horror [dsk]")
@@ -76,37 +70,116 @@ Format your response as a valid JSON object with these exact keys:
 {"name", "set_name", "set_code", "card_number", "condition", "is_foil", "has_stamp", "confidence"}
 
 Do not include markdown formatting or code blocks - just raw JSON."""
-                }
-            ]
-        }],
-        "max_tokens": 300,
-        "temperature": 0.1
-    }
     
+    # Try local Qwen-Omni first
+    print("   Trying local Qwen-Omni...")
     try:
+        payload = {
+            "model": "qwen-omni",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                    {"type": "text", "text": vision_prompt}
+                ]
+            }],
+            "max_tokens": 300,
+            "temperature": 0.1
+        }
+        
         response = requests.post(QWEN_OMNI_URL, json=payload, timeout=60)
         
         if response.status_code == 200:
-            result = response.json()
-            content = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-            
-            # Parse JSON from response
-            import re
-            json_match = re.search(r'\{[^{}]+\}', content)
-            if json_match:
-                card_data = json.loads(json_match.group())
-                print(f"✓ Identified: {card_data.get('name', 'Unknown')}")
-                return card_data
-            else:
-                print(f"⚠ Could not parse vision result: {content[:200]}")
-                return {"error": "Parse failed", "raw": content}
-        else:
-            print(f"✗ Vision API error: {response.status_code}")
-            return {"error": f"API error {response.status_code}"}
-            
+            result = parse_vision_response(response.json())
+            if result and 'error' not in result:
+                print(f"✓ Identified via Qwen-Omni: {result.get('name', 'Unknown')}")
+                return result
     except Exception as e:
-        print(f"✗ Vision analysis failed: {e}")
+        print(f"   Qwen-Omni unavailable: {e}")
+    
+    # Fall back to OpenRouter
+    print("   Falling back to OpenRouter vision API...")
+    try:
+        import os
+        openrouter_key = os.environ.get('OPENROUTER_API_KEY', '')
+        if not openrouter_key:
+            # Try to read from config
+            try:
+                with open('~/.hermes/config.yaml'.expanduser(), 'r') as f:
+                    import yaml
+                    config = yaml.safe_load(f)
+                    openrouter_key = config.get('openrouter_api_key', '')
+            except:
+                pass
+        
+        if not openrouter_key:
+            print("   ⚠ OpenRouter API key not found - vision unavailable")
+            return {"error": "No vision API available"}
+        
+        payload = {
+            "model": "anthropic/claude-3-5-sonnet",
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                    {"type": "text", "text": vision_prompt}
+                ]
+            }],
+            "max_tokens": 300,
+            "temperature": 0.1
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {openrouter_key}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = parse_vision_response(response.json())
+            if result and 'error' not in result:
+                print(f"✓ Identified via OpenRouter: {result.get('name', 'Unknown')}")
+                return result
+            else:
+                print(f"   Response: {response.text[:200]}")
+        
+        print(f"   OpenRouter error: {response.status_code}")
+        return {"error": f"OpenRouter API error {response.status_code}"}
+        
+    except Exception as e:
+        print(f"   OpenRouter failed: {e}")
         return {"error": str(e)}
+
+
+def parse_vision_response(response_json: dict) -> dict:
+    """Parse vision API response and extract card data."""
+    import re
+    import json
+    
+    content = response_json.get('choices', [{}])[0].get('message', {}).get('content', '')
+    
+    # Try to find JSON in response
+    json_match = re.search(r'\{[^{}]*(?:"name"[^{}]*)\}', content)
+    if json_match:
+        try:
+            card_data = json.loads(json_match.group())
+            return card_data
+        except:
+            pass
+    
+    # Try full content as JSON
+    try:
+        return json.loads(content.strip())
+    except:
+        pass
+    
+    return {"error": "Parse failed", "raw": content[:200]}
 
 
 ### PRICING (SCRYFALL) ###

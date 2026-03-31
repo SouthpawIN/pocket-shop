@@ -55,7 +55,7 @@ creds = load_ebay_creds()
 
 AUTH_URL = "https://www.ebay.com/epi/auth"
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth/token"
-LOCAL_PORT = 8089
+LOCAL_PORT = 8091
 REDIRECT_URI = f"http://localhost:{LOCAL_PORT}/callback"
 
 SCOPES = [
@@ -82,7 +82,7 @@ class TokenCaptureHandler(http.server.BaseHTTPRequestHandler):
                 return
             
             if code:
-                print(f"\n\u2705 Authorization code received!")
+                print(f"\n[OK] Authorization code received!")
                 print(f"   Exchanging for tokens...")
                 
                 tokens = exchange_code_for_token(code)
@@ -92,13 +92,13 @@ class TokenCaptureHandler(http.server.BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header("Content-type", "text/html")
                     self.end_headers()
-                    msg = f"<h1>\u2705 Success!</h1><p>Refresh token saved to config.yaml</p>"
+                    msg = f"<h1>Success!</h1><p>Refresh token saved to config.yaml</p>"
                     self.wfile.write(msg.encode())
                 else:
                     self.send_response(200)
                     self.send_header("Content-type", "text/html")
                     self.end_headers()
-                    self.wfile.write(b"<h1>\u274c Failed to get token</h1>")
+                    self.wfile.write(b"<h1>Failed to get token</h1>")
             else:
                 self.send_error_page("No authorization code")
         elif self.path == "/":
@@ -186,23 +186,24 @@ def main():
     print("  Get your refresh token in one click!")
     print("="*60)
     print()
-    print("\ud83d\udccb What will happen:")
+    print("[INFO] What will happen:")
     print("   1. Your browser will open to eBay OAuth page")
     print("   2. Log in with your eBay account")
     print("   3. Grant consent for PocketShop app")
     print("   4. Refresh token will be auto-saved to config.yaml")
     print()
-    print("\u23f1\ufe0f  This only needs to be done ONCE (tokens last ~18 months)")
+    print("[NOTE] This only needs to be done ONCE (tokens last ~18 months)")
     print()
-    input("Press Enter to start...")
+    print("[STARTING] in 2 seconds...")
+    time.sleep(2)
     
-    print(f"\n\ud83d\ude80 Starting local server on port {LOCAL_PORT}...")
+    print(f"\n[STARTING] Local server on port {LOCAL_PORT}...")
     
     with socketserver.TCPServer(("", LOCAL_PORT), TokenCaptureHandler) as httpd:
         def open_browser():
             time.sleep(0.5)
             auth_url = build_authorization_url()
-            print(f"\ud83d\udcf1 Opening browser...")
+            print("[OPENING] Browser...")
             webbrowser.open(auth_url)
         
         threading.Thread(target=open_browser).start()
