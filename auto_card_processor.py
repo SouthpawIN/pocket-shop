@@ -38,7 +38,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 try:
     from scryfall_pricing import get_card_pricing as get_pricing_scryfall
-    from ebay_automation import create_ebay_draft as create_draft_ebay
+    from ebay_api import create_ebay_draft_api as create_draft_ebay_api
 except ImportError:
     print("Warning: Local modules not found, using built-in functions")
 
