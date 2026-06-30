@@ -1,316 +1,156 @@
 ---
 name: pocket-shop-loop
-description: "Main orchestration for automated MTG card trading loop"
-trigger_conditions:
-  - "Running automated MTG trading business"
-  - "User wants to start Pocket-Shop automation"
-tools_required:
-  - "browser_navigate"
-  - "browser_snapshot"
-  - "vision_analyze"
-  - "read_file"
-  - "write_file"
-  - "execute_code"
-calls_skills:
-  - "mtgstocks-set-discovery"
-  - "multi-source-price-comparison"
-  - "card-scanner-vision"
-  - "pocket-shop-finance-tracker"
+description: "Main orchestration for the automated MTG card trading loop — runs discovery, pricing, purchasing, scanning, listing, and finance tracking end-to-end."
+version: 1.0.0
+author: SouthpawIN
+license: MIT
+platforms:
+  - linux
+tags:
+  - mtg
+  - automation
+  - orchestration
+  - trading
+  - pocket-shop
 ---
 
-# Pocket Shop Loop - Main Orchestration
+# Pocket Shop Loop — Main Orchestration
 
-## Overview
+<!-- hermes.tags: mtg, automation, orchestration, trading-loop, pocket-shop -->
+<!-- hermes.related_skills: mtgstocks-set-discovery, multi-source-price-comparison, card-scanner-vision, pocket-shop-finance-tracker -->
 
-Main orchestration skill that runs the complete automated MTG card trading loop:
-1. **Monitor MTGStocks** for high EV sets under budget
-2. **Research prices** across Amazon, MTGGoldfish, TCGPlayer
-3. **Purchase sets** when profitable (manual confirmation or auto)
-4. **Scan cards** with vision when they arrive
-5. **Price each card** with TCGPlayer lookup
-6. **Create eBay listings**
-7. **Track sales** with 30/30/40 splits
-8. **Loop back** when restock fund ready
+This skill is the top-level orchestrator for the entire Pocket Shop system. It ties together set discovery, multi-source price comparison, card scanning, eBay listing, and finance tracking into a single repeatable loop.
 
-## Configuration
+## When to Use
 
-```python
-# Default settings - customize per user
-SET_PURCHASE_THRESHOLD = 150.00  # Restock fund target before buying
-BUDGET_PER_SET = 200.00          # Max to spend on a single set
-MIN_EV_PERCENTAGE = 10.0         # Minimum EV to consider
-FINANCE_FILE = "~/.hermes/pocket-shop/finance.json"
+- The user says "run the pocket shop loop" or "start the trading loop"
+- The user wants to run a full cycle: discover → research → purchase → scan → list → track sales
+- A cron job fires and triggers automated discovery
+- The user wants to check the current state of the trading pipeline
+
+## Configuration Defaults
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `SET_PURCHASE_THRESHOLD` | $150.00 | Minimum restock fund before buying a new set |
+| `BUDGET_PER_SET` | $200.00 | Maximum to spend on a single set |
+| `MIN_EV_PERCENTAGE` | 10.0% | Minimum expected value to consider a set |
+| Config file | `config.example.yaml` | User-overridable settings |
+
+## Steps
+
+### Phase 1 — Load State and Check Finance
+
+1. Use **read_file** to load `data/finance.json` (or run `finance_tracker.py` via **terminal** — see below) to get the current finance summary.
+2. Check the `restock_fund` value. If it is below the `SET_PURCHASE_THRESHOLD`, skip to **Phase 6** (waiting / card processing).
+3. Optionally use **memory** to recall the last discovery run timestamp and results so duplicate sets are not re-researched.
+
+```
+terminal: python3 finance_tracker.py --summary
 ```
 
-## Step-by-Step Workflow
+### Phase 2 — Set Discovery
 
-### Phase 1: Set Discovery and Research
+1. Load the **mtgstocks-set-discovery** skill (or run `mtgstocks_discovery.py` via **terminal**).
+2. Alternatively, run the browser-based discovery manually:
+   - **browser_navigate** to `https://mtgstocks.com/sets`
+   - **browser_snapshot** (full page) to capture the sets table
+   - Parse set names, EV percentages, and buy prices from the snapshot text
+   - Filter to sets under `BUDGET_PER_SET` with EV ≥ `MIN_EV_PERCENTAGE`
+3. Collect the top 4 candidate sets sorted by EV descending.
 
-```python
-def discover_and_research_sets():
-    """Find high-EV sets and compare prices across sources."""
-    from hermes_tools import browser_navigate, browser_snapshot
-    
-    # Step 1: Navigate to MTGStocks
-    print("Step 1: Discovering high-EV sets on MTGStocks...")
-    browser_navigate(url="https://mtgstocks.com/sets")
-    snapshot = browser_snapshot(full=True)
-    page_text = snapshot.get("text", "")
-    
-    # Parse and filter sets under budget with sufficient EV
-    candidates = filter_profitable_sets(page_text, max_price=BUDGET_PER_SET, min_ev=MIN_EV_PERCENTAGE)
-    
-    if not candidates:
-        print(f"No sets found under ${BUDGET_PER_SET} with EV > {MIN_EV_PERCENTAGE}%")
-        return []
-    
-    print(f"Found {len(candidates)} candidate sets")
-    
-    # Step 2: Research prices across sources
-    print("Step 2: Researching prices across retailers...")
-    researched = []
-    for set_data in candidates:
-        researched_result = compare_prices_across_sources(set_data)
-        if researched_result:
-            researched.append(researched_result)
-    
-    # Sort by profit margin descending
-    researched.sort(key=lambda x: x.get("profit_margin_percent", 0), reverse=True)
-    
-    return researched[:4]  # Top 4 best opportunities
+```
+terminal: python3 mtgstocks_discovery.py
 ```
 
-### Phase 2: Purchase Decision
+### Phase 3 — Multi-Source Price Research
 
-```python
-def check_can_purchase(researched_sets):
-    """Check if restock fund can afford any researched sets."""
-    from pocket_shop_finance_tracker import get_finance_summary
-    
-    summary = get_finance_summary()
-    restock_fund = summary["restock_fund"]
-    
-    print(f"Restock Fund: ${restock_fund:.2f}")
-    print(f"Purchase Threshold: ${SET_PURCHASE_THRESHOLD:.2f}")
-    
-    affordable = []
-    for set_data in researched_sets:
-        price = set_data.get("best_price", 0)
-        if price and price <= restock_fund:
-            affordable.append(set_data)
-    
-    return affordable
+1. For each candidate set, load the **multi-source-price-comparison** skill or use **delegate_task** to research prices in parallel:
+   - **delegate_task** with `tasks` containing one subtask per candidate set, each calling the price comparison skill
+2. Each subtask uses **web_search** and **browser_navigate** to check Amazon, MTGGoldfish, and TCGPlayer.
+3. As a fallback, run `scryfall_pricing.py` for individual card pricing:
+
+```
+terminal: python3 scryfall_pricing.py --set MH3
 ```
 
-### Phase 3: Set Purchase (Manual Confirmation)
+4. Rank the researched sets by profit margin descending and pick the best opportunity.
 
-```python
-def purchase_set(set_data):
-    """Purchase a set - requires manual confirmation."""
-    set_name = set_data.get("set_name", "Unknown")
-    price = set_data.get("best_price", 0)
-    source = set_data.get("best_source", "unknown")
-    
-    print(f"\n{'='*60}")
-    print("SET PURCHASE REQUIRED")
-    print(f"{'='*60}")
-    print(f"Set: {set_name}")
-    print(f"Price: ${price:.2f}")
-    print(f"Source: {source}")
-    print(f"Expected EV: {set_data.get('ev_percentage', 0):.1f}%")
-    print(f"Potential Profit: ${set_data.get('potential_profit_dollars', 0):.2f}")
-    print("\n[PURCHASE MODE: Manual confirmation required]")
-    print("User should purchase this set from the recommended source.")
-    print("After purchase arrives, continue to card scanning phase.")
-    
-    # Wait for user confirmation
-    response = input("\nEnter 'confirm' when set has been purchased: ")
-    if response.lower() == "confirm":
-        from pocket_shop_finance_tracker import record_set_purchase
-        record_set_purchase(set_name, set_data.get("set_code", ""), price)
-        return True
-    return False
+### Phase 4 — Purchase Decision
+
+1. Present the top set to the user with:
+   - Set name, source, price, EV%, potential profit
+2. Ask the user to confirm the purchase.
+3. If confirmed, record the purchase using `finance_tracker.py`:
+
+```
+terminal: python3 finance_tracker.py --record-purchase --set "Modern Horizons 3" --amount 156.00
 ```
 
-### Phase 4: Card Scanning (When Sets Arrive)
+4. Use **memory** to store the purchase details (set name, code, price, date, source) for later reference when cards arrive.
 
-```python
-def scan_arrived_cards(card_image_paths):
-    """Scan cards that arrived from purchase."""
-    from card_scanner_vision import batch_scan
-    
-    print(f"\n{'='*60}")
-    print("CARD SCANNING PHASE")
-    print(f"{'='*60}")
-    
-    identified_cards = batch_scan(card_image_paths)
-    
-    print(f"\nIdentified {len(identified_cards)} cards:")
-    for card in identified_cards[:10]:  # Show first 10
-        print(f"  - {card.get('name', 'Unknown')} [{card.get('set_code', '?')}]")
-    
-    return identified_cards
+### Phase 5 — Card Scanning and Listing (When Sets Arrive)
+
+1. When cards physically arrive, the user triggers this phase.
+2. Use **vision_analyze** on each card photo, or load the **card-scanner-vision** skill:
+   - Provide the image path and a prompt asking for card name, set code, condition, foil status
+3. For identified cards, run pricing:
+
+```
+terminal: python3 auto_card_processor.py --input-dir /path/to/card-photos/
 ```
 
-### Phase 5: Price Identified Cards
+4. Create eBay listings:
 
-```python
-def price_identified_cards(cards):
-    """Price each identified card using TCGPlayer lookup."""
-    from tcgplayer_lookup import lookup_card_price
-    
-    print(f"\n{'='*60}")
-    print("CARD PRICING PHASE")
-    print(f"{'='*60}")
-    
-    priced_cards = []
-    for card in cards:
-        name = card.get("name", "Unknown")
-        set_code = card.get("set_code")
-        
-        print(f"Pricing: {name}")
-        
-        try:
-            price = lookup_card_price(name, set_code)
-            card["tcgplayer_price"] = price
-            priced_cards.append(card)
-            print(f"  Price: ${price:.2f}")
-        except Exception as e:
-            print(f"  Error pricing: {e}")
-    
-    return priced_cards
+```
+terminal: python3 create_draft_listing.py --card "Lightning Bolt" --set M21 --price 5.00
 ```
 
-### Phase 6: Create eBay Listings
+   Or use **browser_navigate** to open eBay's listing tool and fill in fields via **browser_type** / **browser_click**.
 
-```python
-def create_ebay_listings(priced_cards):
-    """Create eBay listings for all priced cards."""
-    print(f"\n{'='*60}")
-    print("EBAY LISTING PHASE")
-    print(f"{'='*60}")
-    
-    print(f"Ready to list {len(priced_cards)} cards.")
-    print("[EBAY LISTING MODE: Manual or API-based]")
-    print("\nWould use eBay API or browser automation here.")
-    print("Each card would get a draft listing created.")
-    
-    # TODO: Integrate with eBay API or browser automation
-    # For now, this is manual
+5. Use **delegate_task** to parallelize listing creation when many cards need listing at once.
+
+### Phase 6 — Sales Monitoring
+
+1. Check for new eBay sales via email or dashboard:
+
+```
+terminal: python3 gmail_monitor.py
+terminal: python3 sales_monitor.py
 ```
 
-### Phase 7: Monitor Sales and Apply Splits
+2. For each confirmed sale, record revenue:
 
-```python
-def record_sale_from_ebay(sale_amount, item_name):
-    """Record a sale and apply 30/30/40 split."""
-    from pocket_shop_finance_tracker import record_sale
-    
-    print(f"\n{'='*60}")
-    print("SALE RECORDING")
-    print(f"{'='*60}")
-    
-    transaction = record_sale(sale_amount, item_name)
-    return transaction
+```
+terminal: python3 finance_tracker.py --record-sale --item "Lightning Bolt" --amount 5.00
 ```
 
-### Main Loop Orchestration
+3. The 30/30/40 split is automatically applied (30% savings, 30% profit, 40% restock).
+4. Loop back to **Phase 1** and check if restock fund has reached threshold.
 
-```python
-def main_pocket_shop_loop():
-    """Main automated trading loop."""
-    from pocket_shop_finance_tracker import get_finance_summary
-    
-    print("="*60)
-    print("POCKET SHOP - AUTOMATED MTG TRADING LOOP")
-    print("="*60)
-    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    while True:
-        # Check current status
-        summary = get_finance_summary()
-        restock_fund = summary["restock_fund"]
-        
-        print(f"\n\n[LOOP CYCLE]")
-        print(f"Restock Fund: ${restock_fund:.2f}")
-        print(f"Purchase Threshold: ${SET_PURCHASE_THRESHOLD:.2f}")
-        print(f"Can afford set: {restock_fund >= SET_PURCHASE_THRESHOLD}")
-        
-        # Only discover/purchase if we have funds
-        if restock_fund >= SET_PURCHASE_THRESHOLD:
-            # Phase 1-2: Discover and research sets
-            researched_sets = discover_and_research_sets()
-            
-            if researched_sets:
-                affordable = check_can_purchase(researched_sets)
-                if affordable:
-                    print(f"\nFound {len(affordable)} affordable sets!")
-                    # Show top option
-                    best_option = affordable[0]
-                    print(f"Best option: {best_option['set_name']} - ${best_option['best_price']} from {best_option['best_source']}")
-                    print(f"Profit margin: {best_option['profit_margin_percent']:.1f}%")
-                    
-                    # User confirmation for purchase
-                    if input("\nPurchase this set? (y/n): ").lower() == "y":
-                        purchase_set(best_option)
-        else:
-            print("\nWaiting for restock fund to reach threshold...")
-            print("Focus on card scanning, pricing, and listing.")
-        
-        # Wait before next cycle
-        print("\n[PAUSING - waiting for user action or sales]")
-        print("Press Ctrl+C to stop the loop")
-        
-        try:
-            while restock_fund < SET_PURCHASE_THRESHOLD:
-                import time
-                time.sleep(60)  # Check every minute
-                summary = get_finance_summary()
-                restock_fund = summary["restock_fund"]
-                print(f"Restock: ${restock_fund:.2f} / ${SET_PURCHASE_THRESHOLD:.2f}")
-        except KeyboardInterrupt:
-            print("\nLoop stopped by user.")
-            break
+### Phase 7 — Cron Job Setup (Automated Discovery)
+
+1. To run set discovery daily at 9 AM, use **cronjob**:
+
+```
+cronjob: create a job named "pocket-shop-daily-discovery" that runs the mtgstocks-set-discovery skill every day at 09:00
 ```
 
-## Running the Loop
+2. This ensures new profitable sets surface automatically even when the agent is not actively running.
 
-```bash
-# Start the automated loop
-python3 -c "from pocket_shop_loop import main_pocket_shop_loop; main_pocket_shop_loop()"
-```
+## Pitfalls
 
-## Cron Job Setup (Optional)
+- **MTGStocks uses JavaScript rendering** — a simple HTTP fetch will return an empty page; always use **browser_navigate** + **browser_snapshot**, not `web_extract` alone.
+- **Manual purchase confirmation required** — the agent cannot place real orders; always pause and ask the user before spending money.
+- **eBay API integration is not yet live** — listing creation is currently via browser automation or `create_draft_listing.py` which generates draft data, not live listings.
+- **Sales monitoring depends on Gmail/eBay notifications being configured** — if `gmail_monitor.py` returns nothing, check that OAuth credentials are set up.
+- **Finance state can desync** — if `finance_tracker.py` is run concurrently by two processes, writes to `data/finance.json` may conflict. Use **memory** as a secondary source of truth.
+- **Image quality matters for card scanning** — blurry or glare-heavy photos produce low-confidence vision results.
 
-Run discovery automatically daily:
+## Verification
 
-```bash
-# Add to crontab
-every day at 9 AM:0"
-```
-
-## Verification Steps
-
-After each cycle, verify:
-- Finance totals are correct (savings + profit + restock = total_sales)
-- Sets discovered are under budget with sufficient EV
-- Price research found valid prices from at least one source
-- Card identification has reasonable confidence (> 0.7)
-
-## Pitfalls & Notes
-
-**Manual purchase confirmation** - Currently requires user to confirm purchases
-
-**eBay integration pending** - Listings currently manual; API integration planned
-
-**Sales monitoring pending** - Need Gmail/eBay polling for automatic sale detection
-
-## Integration Summary
-
-| Phase | Skill Used |
-|-------|------------|
-| Set Discovery | mtgstocks-set-discovery |
-| Price Research | multi-source-price-comparison |
-| Card Scanning | card-scanner-vision |
-| Finance Tracking | pocket-shop-finance-tracker |
-| Orchestration | pocket-shop-loop (this skill) |
+- After running the full loop, check that `data/finance.json` totals are consistent: `savings_fund + profit_total + restock_fund == total_sales` (within rounding tolerance).
+- Sets discovered should all be under `BUDGET_PER_SET` with EV ≥ `MIN_EV_PERCENTAGE`.
+- Price research should return at least one valid price per set from at least one source.
+- Card identification results should have confidence > 0.7; flag anything lower for manual review.
+- Cron jobs should appear in the cron job list and have a valid next-run timestamp.

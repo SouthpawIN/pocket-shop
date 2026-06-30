@@ -1,9 +1,13 @@
 # Pocket Shop Configuration Example
 # Copy this to config.yaml and fill in your values
+# NEVER commit config.yaml — only commit this example file.
 
 financial:
   restock_target: 500.00    # Dollar amount to trigger set purchase
   ev_threshold: 10.0        # Minimum EV percentage to consider
+  savings_pct: 0.30         # 30% of sales → savings
+  profit_pct: 0.30          # 30% of sales → profit
+  restock_pct: 0.40         # 40% of sales → restock fund
 
 gmail:
   email: "your-email@gmail.com"
@@ -19,3 +23,42 @@ ebay:
 
 tcgplayer:
   api_key: "YOUR_API_KEY"   # Optional - browser mode works without this
+
+scryfall:
+  enabled: true
+  user_agent: "PocketShop/1.0 (contact: your-email@gmail.com)"
+  # Scryfall API is free but requires a descriptive User-Agent
+  # Docs: https://scryfall.com/docs/api
+
+vision:
+  # Local vision model (Carnice) — runs on GPU1
+  provider: local           # 'local' or 'openrouter'
+  local:
+    url: "http://127.0.0.1:8082/v1"
+    model: "carnice"
+    timeout: 30             # seconds
+  fallback:
+    provider: openrouter    # Used when local model is unreachable
+    model: "google/gemini-2.0-flash-exp:free"
+    # Set OPENROUTER_API_KEY in .env or environment
+  confidence_threshold: 0.75  # Minimum confidence to accept identification
+
+hermes:
+  # Hermes Agent integration settings
+  profile: "senter"         # Active Hermes profile for orchestration
+  skills:
+    - pocket-shop-loop
+    - pocket-shop-finance-tracker
+    - card-scanner-vision
+    - mtgstocks-set-discovery
+    - multi-source-price-comparison
+  cron:
+    discovery_schedule: "0 9 * * *"   # Daily at 9 AM
+    discovery_name: "mtg-discovery"
+  multi_agent:
+    orchestrator: "senter"
+    workers:
+      - name: "chizul"
+        role: "card processing and listing"
+      - name: "crow"
+        role: "price research and discovery"
