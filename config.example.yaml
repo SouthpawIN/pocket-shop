@@ -1,21 +1,52 @@
-# Pocket Shop Configuration Example
-# Copy this to config.yaml and fill in your values
+# Pocket Shop Configuration
+# Copy to config.yaml and fill in your values
 
 financial:
   restock_target: 500.00    # Dollar amount to trigger set purchase
   ev_threshold: 10.0        # Minimum EV percentage to consider
+  split:
+    savings: 0.30           # 30% to savings
+    profit: 0.30            # 30% to profit
+    restock: 0.40           # 40% to restock fund
 
 gmail:
   email: "your-email@gmail.com"
-  app_password: "YOUR_16_CHAR_APP_PASSWORD"  # From Google App Passwords
+  app_password: "YOUR_16_CHAR_APP_PASSWORD"
 
 ebay:
-  mode: browser             # 'browser' (default) or 'api'
-  # If using API mode, add these:
-  # developer_id: "YOUR_DEVELOPER_ID"
-  # cert_id: "YOUR_CERTIFICATE_ID"
-  # app_id: "YOUR_RU_NAME"
-  # refresh_token: "YOUR_REFRESH_TOKEN"
+  mode: api              # 'browser' or 'api'
+  username: ""
+  password: ""
+  app_id: ""              # Required for Auth'n'Auth
+  developer_id: ""        # Required for OAuth mode
+  cert_id: ""
+  app_id_oauth: ""
+  refresh_token: ""
+  marketplace: "EBAY_US"
 
-tcgplayer:
-  api_key: "YOUR_API_KEY"   # Optional - browser mode works without this
+scryfall:
+  user_agent: "Pocket-Shop/2.0 (automated-mtg-trading)"
+
+vision:
+  provider: "nemotron"   # 'nemotron', 'qwen-omni', or 'openrouter'
+  nemotron:
+    base_url: "http://localhost:8101/v1"
+    model: "nvidia/nemotron-3-ultra"
+    api_key: ""          # Leave empty for local
+  qwen_omni:
+    base_url: "http://localhost:8101/v1"
+    model: "qwen-omni"
+  openrouter:
+    api_key: ""
+    model: "anthropic/claude-sonnet-4"
+
+stripe:
+  enabled: false
+  # Stripe Link CLI for agent purchasing
+  # Install: npm install -g @stripe/link-cli
+  # Auth: link-cli auth login --client-name "Pocket-Shop"
+  link_client_name: "Pocket-Shop"
+  # Budget limits (USD, in cents for Link CLI)
+  max_purchase_amount: 5000       # $50.00
+  daily_spend_limit: 20000        # $200.00
+  require_approval: true          # Always require Link app approval
