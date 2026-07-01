@@ -1,167 +1,141 @@
 ---
 name: mtgstocks-set-discovery
-description: "Monitor MTGStocks for Magic sets with high Expected Value under budget"
-trigger_conditions:
-  - "Searching for profitable MTG set investments"
-  - "Running automated trading loop"
-tools_required:
-  - "browser_navigate"
-  - "browser_snapshot"
-  - "browser_click"
-  - "browser_scroll"
+description: "Scrape MTGStocks.com for Magic: The Gathering sealed sets with high Expected Value (EV) under a configurable budget threshold."
+version: 1.0.0
+author: SouthpawIN
+license: MIT
+platforms:
+  - linux
+tags:
+  - mtg
+  - mtgstocks
+  - set-discovery
+  - scraping
+  - browser
 ---
 
-# MTGStocks Set Discovery Skill
+# MTGStocks Set Discovery
 
-## Overview
+<!-- hermes.tags: mtg, mtgstocks, set-discovery, ev, scraping, browser-automation -->
+<!-- hermes.related_skills: pocket-shop-loop, multi-source-price-comparison -->
 
-Monitors **MTGStocks.com** to find Magic: The Gathering sealed product sets with high Expected Value (EV) percentages under a configurable budget threshold.
+This skill scrapes **MTGStocks.com/sets** to find Magic: The Gathering sealed product sets whose Expected Value (EV) exceeds a minimum threshold while staying under a maximum budget. It returns the top 3–4 most profitable candidates for further price research.
 
-### What it does:
-- Navigates to MTGStocks sets page using browser automation
-- Extracts set names, EV percentages, and buy prices
-- Filters by budget (default $200) and minimum EV (default 10%)
-- Returns top 3-4 most profitable set candidates
+## When to Use
 
-## Hermes Tools Used
+- The user says "find profitable MTG sets" or "check MTGStocks for deals"
+- The **pocket-shop-loop** skill calls this as its first phase
+- A cron job fires for scheduled daily discovery
+- The user wants to refresh the candidate list before making a purchase decision
 
-| Tool | Purpose |
-|------|---------|
-| `browser_navigate` | Navigate to MTGStocks.com/sets |
-| `browser_snapshot` | Extract set data from page |
-| `browser_click` | Interact with sort/filter controls |
-| `browser_scroll` | Load more sets into viewport |
+## Configuration
 
-## Step-by-Step Workflow
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `BUDGET_THRESHOLD` | $200.00 | Maximum set price to consider |
+| `MIN_EV_PERCENTAGE` | 10.0% | Minimum EV percentage to qualify |
+| `TOP_N_RESULTS` | 4 | Number of top sets to return |
 
-### 1. Configure Budget Parameters
+These can be overridden in `config.example.yaml` or passed as arguments to `mtgstocks_discovery.py`.
 
-```python
-# Default configuration - adjust per user needs
-BUDGET_THRESHOLD = 200.00  # Max set price to consider
-MIN_EV_PERCENTAGE = 10.0   # Minimum EV to qualify
-TOP_N_RESULTS = 4          # Return top N sets
+## Steps
+
+### Step 1 — Navigate to MTGStocks Sets Page
+
+Use **browser_navigate** to load the sets listing:
+
+```
+browser_navigate to https://mtgstocks.com/sets
 ```
 
-### 2. Navigate to MTGStocks Sets Page
+Wait for the page to fully render (MTGStocks is a JavaScript-heavy site; tables may load after initial paint).
 
-```python
-from hermes_tools import browser_navigate, browser_snapshot
+### Step 2 — Scroll to Load Full Table
 
-browser_navigate(url="https://mtgstocks.com/sets")
+The sets table may be lazy-loaded. Use **browser_scroll** to scroll down repeatedly until no new rows appear:
+
+```
+browser_scroll down 3 times, waiting 1 second between scrolls
 ```
 
-### 3. Extract Set Data from Page
+### Step 3 — Capture Page Snapshot
 
-```python
-# Get full page snapshot
-snapshot = browser_snapshot(full=True)
-page_text = snapshot.get("text", "")
+Take a full-page snapshot to extract the rendered HTML/text:
 
-# Parse set names, EV percentages, and prices from page
-# MTGStocks shows sets with format like:
-# "Set Name - EV: 15.2% - Buy Price: $45.00"
+```
+browser_snapshot (full page)
 ```
 
-### 4. Filter by Budget and EV Threshold
+The snapshot text contains the sets table with columns like: Set Name, EV%, Buy Price, and other metrics.
 
-```python
-import re
+### Step 4 — Parse and Filter Sets
 
-def filter_profitable_sets(page_text, max_price=200, min_ev=10):
-    """Filter sets under budget with sufficient EV."""
-    sets = []
-    # Pattern to match set data in page text
-    pattern = r'([A-Za-z\s&]+?)\s*-?\s*EV:\s*([\d.]+)%.*?Buy\s*Price:\s*\$([\d,]+)'
-    matches = re.findall(pattern, page_text, re.DOTALL)
-    
-    for match in matches:
-        name, ev_str, price_str = match
-        ev = float(ev_str)
-        price = float(price_str.replace(',', ''))
-        
-        if price <= max_price and ev >= min_ev:
-            sets.append({
-                "name": name.strip(),
-                "ev_percentage": ev,
-                "buy_price": price,
-                "expected_value": price * (1 + ev/100)
-            })
-    
-    # Sort by EV descending, return top N
-    sets.sort(key=lambda x: x["ev_percentage"], reverse=True)
-    return sets[:TOP_N_RESULTS]
+From the snapshot text, extract each set's:
+- **Name** (e.g., "Modern Horizons 3")
+- **EV percentage** (e.g., 24.5%)
+- **Buy price** (e.g., $156.00)
+
+Filter to sets where:
+- `buy_price ≤ BUDGET_THRESHOLD`
+- `ev_percentage ≥ MIN_EV_PERCENTAGE`
+
+Sort the filtered sets by `ev_percentage` descending and keep the top `TOP_N_RESULTS`.
+
+### Step 5 — Run the Python Module (Alternative)
+
+Instead of manual browser parsing, run the dedicated discovery script via **terminal**:
+
+```
+terminal: python3 mtgstocks_discovery.py --budget 200 --min-ev 10 --top 4
 ```
 
-### 5. Return Top Results
+This script handles navigation, parsing, and filtering internally and outputs JSON.
 
-Returns dictionary with discovered sets:
+### Step 6 — Return Results
 
-```python
-{
-    "sets_found": [
-        {
-            "name": "Modern Horizons 3",
-            "ev_percentage": 24.5,
-            "buy_price": 156.00,
-            "expected_value": 194.22,
-            "potential_profit": 38.22
-        },
-        # ... top 4 sets
-    ],
-    "search_parameters": {
-        "max_price": 200.00,
-        "min_ev": 10.0
-    }
-}
+Present the discovered sets to the user or pass them to the **multi-source-price-comparison** skill. Each result should include:
+
+- Set name
+- Set code (if available)
+- EV percentage
+- Buy price
+- Expected value (price × (1 + EV/100))
+- Potential profit (expected_value − buy_price)
+
+### Step 7 — Set Up Automated Discovery (Cron Job)
+
+To run this skill automatically every day at 9 AM:
+
+```
+cronjob: create a job named "pocket-shop-daily-discovery"
+  skill: mtgstocks-set-discovery
+  schedule: "0 9 * * *"
 ```
 
-## Verification Steps
+This ensures new opportunities surface without manual triggering.
 
-After discovery, verify:
-- Set names are recognizable MTG sets
-- EV percentages are realistic (5-50% range typically)
-- Buy prices match budget constraints
-- At least one set found under threshold
+### Step 8 — Store Results in Memory
 
-## Pitfalls & Notes
+Use **memory** to save the discovery run details so the main loop can check for duplicates:
 
-**MTGStocks requires JavaScript rendering** - Use browser automation, not simple HTTP requests
-
-**EV calculation varies by source** - MTGStocks EV is based on historical sell-through data
-
-**Set availability fluctuates** - A set showing high EV today may be sold out tomorrow
-
-## Example Usage in Main Loop
-
-```python
-# Discover sets under $200 with EV > 10%
-browser_navigate(url="https://mtgstocks.com/sets")
-snapshot = browser_snapshot(full=True)
-page_text = snapshot.get("text", "")
-
-candidates = filter_profitable_sets(page_text, max_price=200, min_ev=10)
-
-if candidates:
-    print(f"Found {len(candidates)} high-EV sets under $200")
-    for set_data in candidates:
-        print(f"  - {set_data['name']}: EV {set_data['ev_percentage']}%, Price ${set_data['buy_price']}")
+```
+memory: store "mtgstocks_discovery_<date>" with the list of discovered set names and codes
 ```
 
-## Integration with Other Skills
+## Pitfalls
 
-This skill feeds into:
-1. **multi-source-price-comparison** - Compare discovered sets across retailers
-2. **pocket-shop-loop** - Main orchestration calls this first
-3. **cron job** - Can run discovery periodically (e.g., daily at 9 AM)
+- **MTGStocks requires full JavaScript rendering** — `web_extract` alone may return incomplete data; always use **browser_navigate** + **browser_snapshot**.
+- **Set availability changes daily** — a high-EV set found today may be sold out or repriced by tomorrow. Treat results as point-in-time snapshots.
+- **EV is based on historical sell-through data** — it does not guarantee future returns. High EV on a niche set may not translate to actual card sales on eBay.
+- **Rate limiting** — repeatedly scraping MTGStocks in a short window may trigger IP blocks. Space out requests and respect robots.txt.
+- **Table format may change** — if MTGStocks redesigns their sets page, the parsing logic in `mtgstocks_discovery.py` may need updating.
+- **Some sets lack EV data** — skip sets where EV is missing or zero rather than treating them as 0% EV opportunities.
 
-## Testing
+## Verification
 
-```python
-# Quick test - does MTGStocks load?
-browser_navigate(url="https://mtgstocks.com/sets")
-snapshot = browser_snapshot(full=False)
-
-if "Sets" in snapshot.get("text", ""):
-    print("MTGStocks page loaded successfully")
-```
+- The returned set names should be recognizable MTG set names (e.g., "Modern Horizons 3", "Bloomburrow").
+- EV percentages should be in a realistic range (typically 5–50%).
+- Buy prices should all be ≤ `BUDGET_THRESHOLD`.
+- At least one set should be found when the market is active; zero results may indicate a site scraping failure.
+- Cross-check one set manually by visiting MTGStocks in a browser and confirming the EV and price match.
+- The cron job (if created) should appear in the cron list with a valid next-run time.

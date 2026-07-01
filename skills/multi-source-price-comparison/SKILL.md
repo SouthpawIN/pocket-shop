@@ -1,197 +1,155 @@
 ---
 name: multi-source-price-comparison
-description: "Compare MTG set prices across Amazon, MTGGoldfish, TCGPlayer for best deal"
-trigger_conditions:
-  - "Researching best price for MTG sets"
-  - "After discovering high-EV sets on MTGStocks"
-tools_required:
-  - "browser_navigate"
-  - "browser_snapshot"
-  - "web_search"
+description: "Compare MTG sealed set prices across Amazon, MTGGoldfish, TCGPlayer, and Scryfall to find the best deal and calculate real profit margins."
+version: 1.0.0
+author: SouthpawIN
+license: MIT
+platforms:
+  - linux
+tags:
+  - mtg
+  - pricing
+  - comparison
+  - amazon
+  - tcgplayer
+  - scryfall
 ---
 
-# Multi-Source Price Comparison Skill
+# Multi-Source Price Comparison
 
-## Overview
+<!-- hermes.tags: mtg, pricing, price-comparison, amazon, mtggoldfish, tcgplayer, scryfall -->
+<!-- hermes.related_skills: pocket-shop-loop, mtgstocks-set-discovery, card-scanner-vision -->
 
-Compares actual purchase prices for Magic: The Gathering sealed sets across multiple retailers to find the best real profit margin.
+This skill takes a set (or list of sets) discovered by **mtgstocks-set-discovery** and checks actual purchase prices across multiple retailers. It returns the best price, the source, and the calculated profit margin for each set.
 
-### Sources Compared:
-1. **MTGStocks** - Already have from discovery phase
-2. **Amazon** - Often has competitive pricing on sealed product
-3. **MTGGoldfish** - Marketplace with various sellers
-4. **TCGPlayer** - Largest MTG marketplace
+## When to Use
 
-## Hermes Tools Used
+- After discovering high-EV sets and needing to find the cheapest source
+- The user says "compare prices for [set name]" or "find the best deal on [set]"
+- The **pocket-shop-loop** skill calls this during Phase 3 (price research)
+- The user wants to validate that a set is actually profitable at current market prices
 
-| Tool | Purpose |
-|------|---------|
-| `browser_navigate` | Visit each retailer's website |
-| `browser_snapshot` | Extract pricing data from pages |
-| `web_search` | Find product listings on Amazon |
+## Sources Compared
 
-## Step-by-Step Workflow
+| Source | Method | Notes |
+|--------|--------|-------|
+| Amazon | **web_search** + **browser_navigate** | Search for "[set name] booster box" or "bundle" |
+| MTGGoldfish | **browser_navigate** | Marketplace with multiple sellers |
+| TCGPlayer | **browser_navigate** | Largest MTG marketplace; sealed product section |
+| Scryfall (card-level) | **terminal** → `scryfall_pricing.py` | Free API for individual card prices (fallback) |
 
-### 1. Input: Set(s) to Research
+## Steps
 
-Take set name/code from MTGStocks discovery:
+### Step 1 — Gather Set Information
 
-```python
-sets_to_research = [
-    {"name": "Modern Horizons 3", "code": "MH3"},
-    {"name": "Bloomburrow", "code": "BLB"}
-]
+Confirm the set(s) to research. Each set needs:
+- Set name (e.g., "Modern Horizons 3")
+- Set code (e.g., "MH3")
+- EV percentage from MTGStocks discovery
+
+### Step 2 — Search Amazon
+
+Use **web_search** to find the product on Amazon:
+
+```
+web_search: "Modern Horizons 3 booster box site:amazon.com"
 ```
 
-### 2. Search Amazon for Set Price
+Then navigate to the top result:
 
-```python
-def search_amazon_price(set_name):
-    """Search Amazon for sealed set price."""
-    from hermes_tools import browser_navigate, browser_snapshot
-    
-    # Build Amazon search URL
-    search_url = f"https://www.amazon.com/s?k={set_name.replace(' ', '+')}+booster+box"
-    browser_navigate(url=search_url)
-    
-    snapshot = browser_snapshot(full=True)
-    page_text = snapshot.get("text", "")
-    
-    # Extract first relevant price (booster box or bundle)
-    import re
-    price_match = re.search(r'\$([\d,]+\.\d{2})', page_text)
-    if price_match:
-        return float(price_match.group(1).replace(',', ''))
-    return None
+```
+browser_navigate to the Amazon product URL from search results
+browser_snapshot to capture the page
 ```
 
-### 3. Check MTGGoldfish Marketplace Price
+Extract the price from the snapshot text. Look for the main product price (usually the first prominent dollar amount).
 
-```python
-def search_mtggoldfish_price(set_code):
-    """Get MTGGoldfish marketplace price for set."""
-    from hermes_tools import browser_navigate, browser_snapshot
-    
-    url = f"https://www mtggoldfish.com/product/search?Set={set_code}"
-    browser_navigate(url=url)
-    
-    snapshot = browser_snapshot(full=True)
-    # Parse lowest seller price from marketplace
-    # MTGGoldfish shows "Buy" prices from various sellers
+### Step 3 — Check MTGGoldfish
+
+Navigate to MTGGoldfish's product search:
+
+```
+browser_navigate to https://www.mtggoldfish.com/product/search?query=Modern+Horizons+3
+browser_snapshot to capture marketplace listings
 ```
 
-### 4. Check TCGPlayer Product Price
+Extract the lowest available price from the results. Note that MTGGoldfish prices may exclude shipping.
 
-```python
-def search_tcgplayer_price(set_name):
-    """Search TCGPlayer for sealed set price."""
-    from hermes_tools import browser_navigate, browser_snapshot
-    
-    url = f"https://www.tcgp layer.com/productsearch?q={set_name.replace(' ', '+')}"
-    browser_navigate(url=url)
-    
-    snapshot = browser_snapshot(full=True)
-    # Extract lowest product price
+### Step 4 — Check TCGPlayer
+
+Navigate to TCGPlayer's product search:
+
+```
+browser_navigate to https://www.tcgplayer.com/search?q=Modern+Horizons+3
+browser_snapshot to capture product listings
 ```
 
-### 5. Compare All Sources and Calculate Real Profit
+Extract the lowest sealed product price (booster box, bundle, or similar).
 
-```python
-def compare_prices(set_data):
-    """Compare prices across all sources."""
-    set_name = set_data["name"]
-    set_code = set_data.get("code", "")
-    
-    prices = {
-        "mtgstocks": set_data.get("buy_price"),
-        "amazon": search_amazon_price(set_name),
-        "mtggoldfish": search_mtggoldfish_price(set_code) if set_code else None,
-        "tcgplayer": search_tcgplayer_price(set_name)
-    }
-    
-    # Filter out None values
-    valid_prices = {k: v for k, v in prices.items() if v is not None}
-    
-    if not valid_prices:
-        return None
-    
-    # Find lowest price and source
-    best_source = min(valid_prices, key=valid_prices.get)
-    best_price = valid_prices[best_source]
-    
-    # Calculate real profit margin
-    ev = set_data.get("ev_percentage", 0)
-    expected_value = best_price * (1 + ev / 100)
-    profit_margin = ((expected_value - best_price) / best_price) * 100
-    
-    return {
-        "set_name": set_name,
-        "set_code": set_code,
-        "prices_by_source": valid_prices,
-        "best_source": best_source,
-        "best_price": best_price,
-        "expected_value": expected_value,
-        "profit_margin_percent": profit_margin,
-        "potential_profit_dollars": expected_value - best_price
-    }
+### Step 5 — Use Scryfall API as Fallback (Card-Level Pricing)
+
+If sealed product prices are unavailable, or for individual card pricing after scanning, use the project's Scryfall pricing module:
+
+```
+terminal: python3 scryfall_pricing.py --set MH3 --output json
 ```
 
-### 6. Return Ranked Results
+This calls Scryfall's free API (no key required) and returns average card prices for the entire set. Sum these to estimate the set's total card-level value.
 
-```python
-{
-    "researched_sets": [
-        {
-            "set_name": "Modern Horizons 3",
-            "best_source": "amazon",
-            "best_price": 145.00,
-            "expected_value": 180.50,
-            "profit_margin_percent": 24.5,
-            "potential_profit_dollars": 35.50
-        },
-        # ... sorted by profit margin descending
-    ]
-}
+For a single card:
+
+```
+terminal: python3 scryfall_pricing.py --card "Lightning Bolt" --set M21
 ```
 
-## Verification Steps
+### Step 6 — Compare and Calculate
 
-- All prices are positive numbers
-- Best price is actually the minimum of all sources
-- Profit margin calculation: `(expected_value - best_price) / best_price * 100`
-- At least one source returned a valid price
+For each set, compile prices from all sources that returned valid data:
 
-## Pitfalls & Notes
+1. Discard any source that returned no price or an error.
+2. Find the lowest price across all valid sources — this is the `best_price`.
+3. Calculate:
+   - `expected_value = best_price × (1 + EV_percentage / 100)`
+   - `profit_margin_percent = ((expected_value − best_price) / best_price) × 100`
+   - `potential_profit_dollars = expected_value − best_price`
+4. Sort all researched sets by `profit_margin_percent` descending.
 
-**Amazon requires search parsing** - Product titles vary; need to match "booster box" or "bundle"
+### Step 7 — Parallelize with delegate_task
 
-**MTGGoldfish marketplace varies** - Prices change frequently based on seller inventory
+For multiple candidate sets, use **delegate_task** to research prices concurrently:
 
-**Shipping costs matter** - Compare final cost including shipping, not just base price
-
-**Sales tax** - Varies by location; factor into real profit calculation
-
-## Example Usage
-
-```python
-# Research a discovered set
-set_from_mtgstocks = {
-    "name": "Modern Horizons 3",
-    "code": "MH3", 
-    "ev_percentage": 24.5,
-    "buy_price": 156.00
-}
-
-result = compare_prices(set_from_mtgstocks)
-print(f"Best price: ${result['best_price']} from {result['best_source']}")
-print(f"Potential profit: ${result['potential_profit_dollars']:.2f} ({result['profit_margin_percent']:.1f}%)")
+```
+delegate_task with tasks:
+  - task: "Research price for Modern Horizons 3 (MH3) across Amazon, MTGGoldfish, TCGPlayer"
+  - task: "Research price for Bloomburrow (BLB) across Amazon, MTGGoldfish, TCGPlayer"
+  - task: "Research price for Duskmourn (DSK) across Amazon, MTGGoldfish, TCGPlayer"
 ```
 
-## Integration with Other Skills
+Each subtask runs independently and returns its price comparison results. Collect and merge results when all tasks complete.
 
-Called by:
-- **pocket-shop-loop** - After MTGStocks discovery, before purchase decision
+### Step 8 — Present Results
 
-Feeds into:
-- Purchase decision logic (is profit margin acceptable?)
-- Order placement automation
+Report back to the user or the calling skill with:
+
+- Set name and code
+- Price from each source that returned data
+- Best source and best price
+- EV percentage, expected value, profit margin %, and potential profit $
+
+## Pitfalls
+
+- **Amazon search results are noisy** — the top result may be a single booster pack, not a booster box. Always verify the product title contains "booster box" or "bundle" before using the price.
+- **Shipping costs are not always included** — TCGPlayer and MTGGoldfish may show item price only. Factor in estimated shipping ($5–$15) for accurate comparison.
+- **Sales tax varies by state** — the listed price is pre-tax in most cases.
+- **Scryfall prices are card-level averages** — they do not reflect sealed product premiums. Use Scryfall as a fallback for estimating set EV from individual card prices, not for comparing sealed purchase prices.
+- **MTGGoldfish and TCGPlayer may block automated access** — if browser navigation consistently fails, fall back to `scryfall_pricing.py` and **web_search**.
+- **Prices change frequently** — a price found at 9 AM may be different by noon. Treat all prices as point-in-time snapshots.
+- **TCGPlayer URL uses special encoding** — make sure to URL-encode the set name properly (spaces become `+` or `%20`).
+
+## Verification
+
+- All returned prices should be positive numbers.
+- The `best_price` should be the minimum across all valid sources (not always Amazon).
+- `profit_margin_percent` should equal `((expected_value − best_price) / best_price) × 100`.
+- At least one source should return a valid price for each set; zero prices means all scraping failed.
+- Cross-check one price manually by visiting the source website and confirming the listed price.

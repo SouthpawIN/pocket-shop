@@ -1,52 +1,88 @@
-# Pocket Shop Configuration
-# Copy to config.yaml and fill in your values
+# Pocket Shop Configuration Example
+# Copy this to config.yaml and fill in your values
+# NEVER commit config.yaml — only commit this example file.
 
 financial:
   restock_target: 500.00    # Dollar amount to trigger set purchase
   ev_threshold: 10.0        # Minimum EV percentage to consider
-  split:
-    savings: 0.30           # 30% to savings
-    profit: 0.30            # 30% to profit
-    restock: 0.40           # 40% to restock fund
+  savings_pct: 0.30         # 30% of sales → savings
+  profit_pct: 0.30          # 30% of sales → profit
+  restock_pct: 0.40         # 40% of sales → restock fund
 
 gmail:
   email: "your-email@gmail.com"
-  app_password: "YOUR_16_CHAR_APP_PASSWORD"
+  app_password: "YOUR_16_CHAR_APP_PASSWORD"  # From Google App Passwords
 
 ebay:
-  mode: api              # 'browser' or 'api'
-  username: ""
-  password: ""
-  app_id: ""              # Required for Auth'n'Auth
-  developer_id: ""        # Required for OAuth mode
-  cert_id: ""
-  app_id_oauth: ""
-  refresh_token: ""
-  marketplace: "EBAY_US"
+  mode: browser             # 'browser' (default) or 'api'
+  # If using API mode, add these:
+  # developer_id: "YOUR_DEVELOPER_ID"
+  # cert_id: "YOUR_CERTIFICATE_ID"
+  # app_id: "YOUR_RU_NAME"
+  # refresh_token: "YOUR_REFRESH_TOKEN"
+
+tcgplayer:
+  api_key: "YOUR_API_KEY"   # Optional - browser mode works without this
 
 scryfall:
-  user_agent: "Pocket-Shop/2.0 (automated-mtg-trading)"
+  enabled: true
+  user_agent: "PocketShop/1.0 (contact: your-email@gmail.com)"
+  # Scryfall API is free but requires a descriptive User-Agent
+  # Docs: https://scryfall.com/docs/api
 
 vision:
-  provider: "nemotron"   # 'nemotron', 'qwen-omni', or 'openrouter'
+  # Local vision model (Carnice) — runs on GPU1
+  provider: local           # 'local' or 'openrouter'
+  local:
+    url: "http://127.0.0.1:8082/v1"
+    model: "carnice"
+    timeout: 30             # seconds
+  fallback:
+    provider: openrouter    # Used when local model is unreachable
+    model: "google/gemini-2.0-flash-exp:free"
+    # Set OPENROUTER_API_KEY in .env or environment
+  confidence_threshold: 0.75  # Minimum confidence to accept identification
+  
+  # NVIDIA Nemotron integration (for card grading/identification)
+  # Install: pip install requests Pillow
+  # Docs: https://docs.nvidia.com/nemotron/
   nemotron:
-    base_url: "http://localhost:8101/v1"
-    model: "nvidia/nemotron-3-ultra"
-    api_key: ""          # Leave empty for local
-  qwen_omni:
-    base_url: "http://localhost:8101/v1"
-    model: "qwen-omni"
-  openrouter:
-    api_key: ""
-    model: "anthropic/claude-sonnet-4"
+    enabled: false
+    api_key: ""             # Get from NVIDIA NGC
+    model: "nemotron-3-ultra"
+    endpoint: "http://localhost:8101/v1"
 
+# Stripe payment integration (required for hackathon judges)
+# Install Stripe CLI: 
+#   - macOS: brew install stripe/stripe-cli/stripe
+#   - Linux: curl -s https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | apt-key add -
+#   - Windows: scoop install stripe
 stripe:
   enabled: false
-  # Stripe Link CLI for agent purchasing
-  # Install: npm install -g @stripe/link-cli
-  # Auth: link-cli auth login --client-name "Pocket-Shop"
-  link_client_name: "Pocket-Shop"
-  # Budget limits (USD, in cents for Link CLI)
-  max_purchase_amount: 5000       # $50.00
-  daily_spend_limit: 20000        # $200.00
-  require_approval: true          # Always require Link app approval
+  secret_key: ""            # From Stripe Dashboard
+  webhook_secret: ""        # For webhook verification
+  max_purchase_amount: 5000 # $50.00 in cents (safety limit)
+  daily_spend_limit: 100000 # $1000.00 in cents (daily cap)
+  require_approval: true    # Require human approval for purchases > threshold
+
+hermes:
+  # Hermes Agent integration settings
+  profile: "senter"         # Active Hermes profile for orchestration
+  skills:
+    - pocket-shop-loop
+    - pocket-shop-finance-tracker
+    - card-scanner-vision
+    - mtgstocks-set-discovery
+    - multi-source-price-comparison
+    - stripe-payments       # Stripe integration for hackathon
+    - nemotron-vision       # NVIDIA Nemotron for hackathon
+  cron:
+    discovery_schedule: "0 9 * * *"   # Daily at 9 AM
+    discovery_name: "mtg-discovery"
+  multi_agent:
+    orchestrator: "senter"
+    workers:
+      - name: "chizul"
+        role: "card processing and listing"
+      - name: "crow"
+        role: "price research and discovery"
