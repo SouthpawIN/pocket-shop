@@ -7,310 +7,245 @@ trigger_conditions:
 tools_required:
   - "browser_navigate"
   - "browser_snapshot"
-  - "vision_analyze"
+  - "terminal"
   - "read_file"
   - "write_file"
-  - "execute_code"
 calls_skills:
-  - "mtgstocks-set-discovery"
-  - "multi-source-price-comparison"
-  - "card-scanner-vision"
+  - "nemotron-vision"
+  - "stripe-payments"
   - "pocket-shop-finance-tracker"
 ---
 
-# Pocket Shop Loop - Main Orchestration
+# Pocket Shop Loop - Main Orchestration (v2.0)
 
 ## Overview
 
-Main orchestration skill that runs the complete automated MTG card trading loop:
+Complete automated MTG card trading loop integrated with Stripe payments and NVIDIA Nemotron vision:
+
 1. **Monitor MTGStocks** for high EV sets under budget
-2. **Research prices** across Amazon, MTGGoldfish, TCGPlayer
-3. **Purchase sets** when profitable (manual confirmation or auto)
-4. **Scan cards** with vision when they arrive
-5. **Price each card** with TCGPlayer lookup
-6. **Create eBay listings**
-7. **Track sales** with 30/30/40 splits
-8. **Loop back** when restock fund ready
+2. **Purchase sets** via Stripe Link (human-approved transactions)
+3. **Scan cards** with Nemotron 3 Ultra vision when they arrive
+4. **Price cards** with Scryfall API
+5. **Create eBay listings** via API
+6. **Track sales** via Gmail monitoring
+7. **Apply 30/30/40 splits** automatically
+8. **Loop back** when restock fund reaches threshold
+
+## Architecture
+
+```
+main_loop.py
+    ├─→ mtgstocks_monitor.py (high EV discovery)
+    ├─→ nemotron_vision.py (card identification)
+    ├─→ scryfall_pricing.py (pricing)
+    ├─→ ebay_api.py (listing creation)
+    ├─→ gmail_monitor.py (sale tracking)
+    ├─→ finance_tracker.py (30/30/40 splits)
+    └─→ stripe_payments.py (supply purchasing)
+```
 
 ## Configuration
 
-```python
-# Default settings - customize per user
-SET_PURCHASE_THRESHOLD = 150.00  # Restock fund target before buying
-BUDGET_PER_SET = 200.00          # Max to spend on a single set
-MIN_EV_PERCENTAGE = 10.0         # Minimum EV to consider
-FINANCE_FILE = "~/.hermes/pocket-shop/finance.json"
+In `config.yaml`:
+
+```yaml
+financial:
+  restock_target: 150.00    # Fund threshold for purchases
+  ev_threshold: 10.0        # Minimum EV percentage
+  split:
+    savings: 0.30
+    profit: 0.30
+    restock: 0.40
+
+ebay:
+  mode: "api"
+  app_id: "..."
+  dev_id: "..."
+  cert_id: "..."
+  refresh_token: "..."
+
+gmail:
+  email: "pocket-shop@gmail.com"
+  app_password: "..."
+
+stripe:
+  enabled: true
+  max_purchase_amount: 5000  # $50.00
 ```
 
 ## Step-by-Step Workflow
 
-### Phase 1: Set Discovery and Research
-
-```python
-def discover_and_research_sets():
-    """Find high-EV sets and compare prices across sources."""
-    from hermes_tools import browser_navigate, browser_snapshot
-    
-    # Step 1: Navigate to MTGStocks
-    print("Step 1: Discovering high-EV sets on MTGStocks...")
-    browser_navigate(url="https://mtgstocks.com/sets")
-    snapshot = browser_snapshot(full=True)
-    page_text = snapshot.get("text", "")
-    
-    # Parse and filter sets under budget with sufficient EV
-    candidates = filter_profitable_sets(page_text, max_price=BUDGET_PER_SET, min_ev=MIN_EV_PERCENTAGE)
-    
-    if not candidates:
-        print(f"No sets found under ${BUDGET_PER_SET} with EV > {MIN_EV_PERCENTAGE}%")
-        return []
-    
-    print(f"Found {len(candidates)} candidate sets")
-    
-    # Step 2: Research prices across sources
-    print("Step 2: Researching prices across retailers...")
-    researched = []
-    for set_data in candidates:
-        researched_result = compare_prices_across_sources(set_data)
-        if researched_result:
-            researched.append(researched_result)
-    
-    # Sort by profit margin descending
-    researched.sort(key=lambda x: x.get("profit_margin_percent", 0), reverse=True)
-    
-    return researched[:4]  # Top 4 best opportunities
-```
-
-### Phase 2: Purchase Decision
-
-```python
-def check_can_purchase(researched_sets):
-    """Check if restock fund can afford any researched sets."""
-    from pocket_shop_finance_tracker import get_finance_summary
-    
-    summary = get_finance_summary()
-    restock_fund = summary["restock_fund"]
-    
-    print(f"Restock Fund: ${restock_fund:.2f}")
-    print(f"Purchase Threshold: ${SET_PURCHASE_THRESHOLD:.2f}")
-    
-    affordable = []
-    for set_data in researched_sets:
-        price = set_data.get("best_price", 0)
-        if price and price <= restock_fund:
-            affordable.append(set_data)
-    
-    return affordable
-```
-
-### Phase 3: Set Purchase (Manual Confirmation)
-
-```python
-def purchase_set(set_data):
-    """Purchase a set - requires manual confirmation."""
-    set_name = set_data.get("set_name", "Unknown")
-    price = set_data.get("best_price", 0)
-    source = set_data.get("best_source", "unknown")
-    
-    print(f"\n{'='*60}")
-    print("SET PURCHASE REQUIRED")
-    print(f"{'='*60}")
-    print(f"Set: {set_name}")
-    print(f"Price: ${price:.2f}")
-    print(f"Source: {source}")
-    print(f"Expected EV: {set_data.get('ev_percentage', 0):.1f}%")
-    print(f"Potential Profit: ${set_data.get('potential_profit_dollars', 0):.2f}")
-    print("\n[PURCHASE MODE: Manual confirmation required]")
-    print("User should purchase this set from the recommended source.")
-    print("After purchase arrives, continue to card scanning phase.")
-    
-    # Wait for user confirmation
-    response = input("\nEnter 'confirm' when set has been purchased: ")
-    if response.lower() == "confirm":
-        from pocket_shop_finance_tracker import record_set_purchase
-        record_set_purchase(set_name, set_data.get("set_code", ""), price)
-        return True
-    return False
-```
-
-### Phase 4: Card Scanning (When Sets Arrive)
-
-```python
-def scan_arrived_cards(card_image_paths):
-    """Scan cards that arrived from purchase."""
-    from card_scanner_vision import batch_scan
-    
-    print(f"\n{'='*60}")
-    print("CARD SCANNING PHASE")
-    print(f"{'='*60}")
-    
-    identified_cards = batch_scan(card_image_paths)
-    
-    print(f"\nIdentified {len(identified_cards)} cards:")
-    for card in identified_cards[:10]:  # Show first 10
-        print(f"  - {card.get('name', 'Unknown')} [{card.get('set_code', '?')}]")
-    
-    return identified_cards
-```
-
-### Phase 5: Price Identified Cards
-
-```python
-def price_identified_cards(cards):
-    """Price each identified card using TCGPlayer lookup."""
-    from tcgplayer_lookup import lookup_card_price
-    
-    print(f"\n{'='*60}")
-    print("CARD PRICING PHASE")
-    print(f"{'='*60}")
-    
-    priced_cards = []
-    for card in cards:
-        name = card.get("name", "Unknown")
-        set_code = card.get("set_code")
-        
-        print(f"Pricing: {name}")
-        
-        try:
-            price = lookup_card_price(name, set_code)
-            card["tcgplayer_price"] = price
-            priced_cards.append(card)
-            print(f"  Price: ${price:.2f}")
-        except Exception as e:
-            print(f"  Error pricing: {e}")
-    
-    return priced_cards
-```
-
-### Phase 6: Create eBay Listings
-
-```python
-def create_ebay_listings(priced_cards):
-    """Create eBay listings for all priced cards."""
-    print(f"\n{'='*60}")
-    print("EBAY LISTING PHASE")
-    print(f"{'='*60}")
-    
-    print(f"Ready to list {len(priced_cards)} cards.")
-    print("[EBAY LISTING MODE: Manual or API-based]")
-    print("\nWould use eBay API or browser automation here.")
-    print("Each card would get a draft listing created.")
-    
-    # TODO: Integrate with eBay API or browser automation
-    # For now, this is manual
-```
-
-### Phase 7: Monitor Sales and Apply Splits
-
-```python
-def record_sale_from_ebay(sale_amount, item_name):
-    """Record a sale and apply 30/30/40 split."""
-    from pocket_shop_finance_tracker import record_sale
-    
-    print(f"\n{'='*60}")
-    print("SALE RECORDING")
-    print(f"{'='*60}")
-    
-    transaction = record_sale(sale_amount, item_name)
-    return transaction
-```
-
-### Main Loop Orchestration
-
-```python
-def main_pocket_shop_loop():
-    """Main automated trading loop."""
-    from pocket_shop_finance_tracker import get_finance_summary
-    
-    print("="*60)
-    print("POCKET SHOP - AUTOMATED MTG TRADING LOOP")
-    print("="*60)
-    print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    while True:
-        # Check current status
-        summary = get_finance_summary()
-        restock_fund = summary["restock_fund"]
-        
-        print(f"\n\n[LOOP CYCLE]")
-        print(f"Restock Fund: ${restock_fund:.2f}")
-        print(f"Purchase Threshold: ${SET_PURCHASE_THRESHOLD:.2f}")
-        print(f"Can afford set: {restock_fund >= SET_PURCHASE_THRESHOLD}")
-        
-        # Only discover/purchase if we have funds
-        if restock_fund >= SET_PURCHASE_THRESHOLD:
-            # Phase 1-2: Discover and research sets
-            researched_sets = discover_and_research_sets()
-            
-            if researched_sets:
-                affordable = check_can_purchase(researched_sets)
-                if affordable:
-                    print(f"\nFound {len(affordable)} affordable sets!")
-                    # Show top option
-                    best_option = affordable[0]
-                    print(f"Best option: {best_option['set_name']} - ${best_option['best_price']} from {best_option['best_source']}")
-                    print(f"Profit margin: {best_option['profit_margin_percent']:.1f}%")
-                    
-                    # User confirmation for purchase
-                    if input("\nPurchase this set? (y/n): ").lower() == "y":
-                        purchase_set(best_option)
-        else:
-            print("\nWaiting for restock fund to reach threshold...")
-            print("Focus on card scanning, pricing, and listing.")
-        
-        # Wait before next cycle
-        print("\n[PAUSING - waiting for user action or sales]")
-        print("Press Ctrl+C to stop the loop")
-        
-        try:
-            while restock_fund < SET_PURCHASE_THRESHOLD:
-                import time
-                time.sleep(60)  # Check every minute
-                summary = get_finance_summary()
-                restock_fund = summary["restock_fund"]
-                print(f"Restock: ${restock_fund:.2f} / ${SET_PURCHASE_THRESHOLD:.2f}")
-        except KeyboardInterrupt:
-            print("\nLoop stopped by user.")
-            break
-```
-
-## Running the Loop
+### Phase 1: Monitor MTGStocks
 
 ```bash
-# Start the automated loop
-python3 -c "from pocket_shop_loop import main_pocket_shop_loop; main_pocket_shop_loop()"
+# Manual trigger
+python main.py monitor-sets --min-ev 10.0 --budget 150.00
+
+# Or via Hermes cron (every 6 hours)
+# See cron_jobs/monitor_sets.sh
 ```
 
-## Cron Job Setup (Optional)
+The `mtgstocks_monitor.py` module:
+- Scrapes MTGStocks for sealed sets with EV > threshold
+- Compares prices across Amazon, MTGGoldfish, TCGPlayer
+- Returns top 4 most profitable sets under budget
 
-Run discovery automatically daily:
+### Phase 2: Purchase Supplies via Stripe
+
+When restock fund reaches threshold:
+
+```python
+from stripe_payments import purchase_supplies
+
+result = purchase_supplies(
+    item_name="Booster Box - Modern Horizons 3",
+    amount_usd=145.00,
+    merchant_name="Amazon",
+    merchant_url="https://amazon.com",
+    require_approval=True,
+)
+
+if result.get("success"):
+    print(f"Purchase approved: {result['data']['id']}")
+```
+
+**Security**: Every purchase requires human approval in Stripe Link app.
+
+### Phase 3: Scan Cards with Nemotron Vision
+
+When ordered sets arrive:
 
 ```bash
-# Add to crontab
-every day at 9 AM:0"
+# Single card
+python main.py scan card.jpg --price
+
+# Batch scan
+python main.py process *.jpg --output cards.json
+```
+
+The `nemotron_vision.py` module:
+1. Encodes image to base64
+2. Sends to Nemotron 3 Ultra (fallback: Qwen-Omni → OpenRouter)
+3. Parses JSON response with card details
+4. Prices via Scryfall API
+5. Saves to `data/processed_cards/`
+
+### Phase 4: Create eBay Listings
+
+```python
+from ebay_api import create_draft_listing
+
+result = create_draft_listing(
+    card_name="Black Lotus",
+    set_code="lea",
+    price=50000.00,
+    condition="Near Mint",
+    image_path="card.jpg",
+)
+```
+
+The `ebay_api.py` module:
+- Authenticates via OAuth
+- Creates draft listing with structured data
+- Returns listing ID for publishing
+
+### Phase 5: Monitor Sales via Gmail
+
+```bash
+# Check for new eBay sale notifications
+python main.py check-emails --record-sales
+```
+
+The `gmail_monitor.py` module:
+- Fetches unread eBay sale emails
+- Parses sale amount and item name
+- Records via `finance_tracker.record_sale()`
+- Applies 30/30/40 split automatically
+
+### Phase 6: Finance Tracking
+
+```bash
+# View current status
+python main.py finance status
+
+# View transaction history
+python main.py finance history --limit 20
+
+# Manually record a sale
+python main.py finance add 25.00 "Sol Ring" cmr
+```
+
+The `finance_tracker.py` module:
+- Tracks savings/profit/restock funds
+- Records every transaction with timestamp
+- Persists to `data/finance.json`
+- Enforces 30/30/40 split
+
+### Phase 7: Loop Back
+
+When `restock_fund >= restock_target`:
+- Return to Phase 1 (discover new sets)
+- Continue the cycle
+
+## Hermes Cron Jobs
+
+Automate the loop with scheduled jobs:
+
+```bash
+# Monitor MTGStocks every 6 hours
+cron_jobs/monitor_sets.sh
+
+# Check Gmail every hour
+cron_jobs/monitor_emails.sh
+```
+
+These are Hermes-compatible cron scripts that:
+- Run `main.py` commands on schedule
+- Log output to `logs/`
+- Handle errors gracefully
+
+## Running the Full Loop
+
+```bash
+# Interactive mode (manual triggers)
+python main_loop.py --interactive
+
+# Automated mode (runs all phases)
+python main_loop.py --auto --budget 150.00
 ```
 
 ## Verification Steps
 
-After each cycle, verify:
-- Finance totals are correct (savings + profit + restock = total_sales)
-- Sets discovered are under budget with sufficient EV
-- Price research found valid prices from at least one source
-- Card identification has reasonable confidence (> 0.7)
+1. **Finance accuracy**: `finance status` shows correct balances
+2. **Vision pipeline**: Test with known cards, verify identification
+3. **Pricing accuracy**: Compare Scryfall prices to TCGPlayer
+4. **Listing creation**: Check eBay drafts have correct data
+5. **Sale tracking**: Manually record a sale, verify split
+6. **Stripe integration**: Test with low-amount purchase
 
-## Pitfalls & Notes
+## Pitfalls
 
-**Manual purchase confirmation** - Currently requires user to confirm purchases
-
-**eBay integration pending** - Listings currently manual; API integration planned
-
-**Sales monitoring pending** - Need Gmail/eBay polling for automatic sale detection
+- **Stripe approval delays**: Purchases require human approval (5-10 min)
+- **Vision accuracy**: Poor lighting reduces Nemotron confidence
+- **eBay rate limits**: Don't create >100 listings/hour
+- **Gmail IMAP delays**: Sale emails arrive 1-5 min after sale
+- **Scryfall rate limits**: Pricing has 50-100ms rate limit
 
 ## Integration Summary
 
-| Phase | Skill Used |
-|-------|------------|
-| Set Discovery | mtgstocks-set-discovery |
-| Price Research | multi-source-price-comparison |
-| Card Scanning | card-scanner-vision |
-| Finance Tracking | pocket-shop-finance-tracker |
-| Orchestration | pocket-shop-loop (this skill) |
+| Phase | Module | Skill |
+|-------|--------|-------|
+| Discovery | `mtgstocks_monitor.py` | (built-in) |
+| Purchasing | `stripe_payments.py` | `stripe-payments` |
+| Scanning | `nemotron_vision.py` | `nemotron-vision` |
+| Pricing | `scryfall_pricing.py` | (built-in) |
+| Listings | `ebay_api.py` | (built-in) |
+| Sales | `gmail_monitor.py` | (built-in) |
+| Finance | `finance_tracker.py` | `pocket-shop-finance-tracker` |
+
+## Related Skills
+
+- `stripe-payments`: Detailed Stripe Link integration
+- `nemotron-vision`: Vision model configuration
+- `pocket-shop-finance-tracker`: Finance tracking logic
+- `pocket-shop-gmail-monitor`: Gmail email monitoring
