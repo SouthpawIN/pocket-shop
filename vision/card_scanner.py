@@ -137,7 +137,7 @@ class CardScanner:
             "name": card_name,
             "set": card_set,
             "rarity": rarity,
-            "confidence": 0.85,  # Placeholder
+            "confidence": result.get("confidence", 0.0),  # From model response
             "raw_response": text_response
         }
     
