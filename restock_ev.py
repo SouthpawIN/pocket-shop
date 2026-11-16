@@ -193,7 +193,7 @@ def buy_order(candidate: Candidate, evaluation: Evaluation, *, balance: float,
         "",
         "## Approval",
         "",
-        "Nothing is purchased until Chris clicks. This file is the request.",
+        "Nothing is purchased until the operator clicks. This file is the request.",
         "",
         f"_Generated {datetime.now().isoformat(timespec='seconds')}_",
     ]

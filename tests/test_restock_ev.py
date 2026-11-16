@@ -105,7 +105,7 @@ def test_buy_order_states_the_numbers_and_needs_a_human() -> None:
     text = rev.buy_order(candidate(), evaluation, balance=520.0)
     assert "# Buy order" in text
     assert "Trigger price" in text
-    assert "Nothing is purchased until Chris clicks" in text
+    assert "Nothing is purchased until the operator clicks" in text
     assert "$520.00" in text and "$340.00" in text  # balance and post-purchase
 
 
