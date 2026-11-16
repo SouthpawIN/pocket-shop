@@ -75,7 +75,7 @@ class eBayAPI:
             self.auth_method = 'authn'
             self.username = config['ebay_username']
             self.password = config['ebay_password']
-            self.app_id = config.get('ebay_app_id', 'Christop-PocketSh-PRD-72b0faaa2-33ae83df')
+            self.app_id = config.get('ebay_app_id', 'YOUR_EBAY_APP_ID')
         elif all([config.get('ebay_developer_id'), config.get('ebay_cert_id'), config.get('ebay_refresh_token')]):
             self.auth_method = 'oauth'
             self.developer_id = config['ebay_developer_id']
@@ -87,7 +87,7 @@ class eBayAPI:
                 "  For Auth'n'Auth (recommended):\n"
                 "    ebay_username: your_ebay_username\n"
                 "    ebay_password: your_ebay_password\n"
-                "    ebay_app_id: Christop-PocketSh-PRD-72b0faaa2-33ae83df\n"
+                "    ebay_app_id: YOUR_EBAY_APP_ID\n"
                 "  For OAuth:\n"
                 "    ebay_developer_id, ebay_cert_id, ebay_refresh_token"
             )
@@ -339,7 +339,7 @@ def load_ebay_config() -> Dict:
         return {
             'ebay_username': config.get('ebay_username'),
             'ebay_password': config.get('ebay_password'),
-            'ebay_app_id': config.get('ebay_app_id', 'Christop-PocketSh-PRD-72b0faaa2-33ae83df'),
+            'ebay_app_id': config.get('ebay_app_id', 'YOUR_EBAY_APP_ID'),
             'ebay_developer_id': config.get('ebay_developer_id'),
             'ebay_cert_id': config.get('ebay_cert_id'),
             'ebay_refresh_token': config.get('ebay_refresh_token'),
@@ -361,7 +361,7 @@ def create_ebay_draft_api(card_info: Dict) -> Dict:
             "error": "eBay credentials not configured. Add to config.yaml:\n"
                      "  ebay_username: YOUR_EBAY_USERNAME\n"
                      "  ebay_password: YOUR_EBAY_PASSWORD\n"
-                     "  ebay_app_id: Christop-PocketSh-PRD-72b0faaa2-33ae83df"
+                     "  ebay_app_id: YOUR_EBAY_APP_ID"
         }
     
     try:
