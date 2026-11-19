@@ -153,3 +153,30 @@ def test_realised_fraction_out_of_range_refuses():
 def test_breakdown_is_json_shaped():
     b = Sale(5.0).breakdown(C)
     assert all(isinstance(v, (int, float, str)) for v in b.values())
+
+
+# --- market parity, sourced in docs/shipping-market-rates.md -----------------
+
+def test_tcgplayer_minimum_parity_contribution():
+    # TCGplayer's sub-$5 floor is 1.49; matching it yields 0.893 per order.
+    assert round(Costs(shipping_charged=1.49).shipping_contribution(), 3) == 0.893
+
+
+def test_free_shipping_loses_money_below_eighty_one_cents():
+    free = Costs(shipping_charged=0.0)
+    assert breakeven_price(free) == 0.81
+    assert net_for(0.50, free) < 0
+    assert net_for(1.00, free) > 0
+
+
+def test_shipping_charge_ranking_is_monotonic_in_net():
+    nets = [net_for(5.0, Costs(shipping_charged=sc)) for sc in (0.0, 0.99, 1.49, 1.99)]
+    assert nets == sorted(nets)
+
+
+def test_one_order_covers_many_cards_when_shipping_is_free():
+    # Free shipping is viable on a multi-card order: one 0.40 across ten cards.
+    free = Costs(shipping_charged=0.0)
+    lot = Sale(10.0, quantity=10).breakdown(free)
+    assert lot["net"] > 0
+    assert lot["per_card_net"] > 0
